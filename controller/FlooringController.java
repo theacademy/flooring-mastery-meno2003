@@ -1,10 +1,35 @@
-package Practice.FlooringMastery.controller;
+/*
+ * =============================================================================
+ * CLASS: FlooringController
+ * PACKAGE: controller
+ * =============================================================================
+ * MVC ROLE: Controller — orchestrates application flow between View and Service.
+ *
+ * SPRING DI: XML bean id "controller" injects view + orderService (programming to OrderService interface).
+ *
+ * DEPENDENCIES (constructor injection, final fields):
+ *   - FlooringView (composition) — all user I/O
+ *   - OrderService (interface — abstraction/polymorphism) — all business operations
+ *
+ * DOES NOT: Open files, compute tax, validate regex — separation of concerns.
+ *
+ * EXCEPTION HANDLING: Catches FlooringPersistenceException | FlooringValidationException
+ *                     in run() so one bad order does not exit the program.
+ *
+ * STATE: Menu loop flag keepGoing — minimal session state; no cached orders.
+ *
+ * INTERVIEW EXPLANATION:
+ * "The controller orchestrates application flow but does not contain business logic.
+ *  Business rules are delegated to the service layer to maintain separation of concerns."
+ * =============================================================================
+ */
+package controller;
 
-import Practice.FlooringMastery.DAO.FlooringPersistenceException;
-import Practice.FlooringMastery.Model.Order;
-import Practice.FlooringMastery.View.FlooringView;
-import Practice.FlooringMastery.service.FlooringValidationException;
-import Practice.FlooringMastery.service.OrderService;
+import DAO.FlooringPersistenceException;
+import Model.Order;
+import View.FlooringView;
+import service.FlooringValidationException;
+import service.OrderService;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -12,14 +37,27 @@ import java.util.List;
 
 public class FlooringController {
 
+    /** VIEW dependency — composition; injected, not created here (loose coupling). */
     private final FlooringView view;
+
+    /** SERVICE dependency — interface type enables polymorphism and test doubles. */
     private final OrderService service;
 
+    /**
+     * Constructor injection: Spring supplies view and OrderServiceImpl (wired as OrderService type).
+     *
+     * @param view    presentation layer
+     * @param service business layer (interface)
+     */
     public FlooringController(FlooringView view, OrderService service){
         this.view = view;
         this.service = service;
     }
 
+    /**
+     * Main application loop — runs until user selects Quit (6).
+     * PATTERN: Front controller / menu-driven console app.
+     */
     public void run(){
 
         boolean keepGoing = true;
@@ -57,12 +95,20 @@ public class FlooringController {
                         view.displayUnknownCommandBanner();
                 }
             } catch (FlooringPersistenceException | FlooringValidationException e) {
+                // EXCEPTION HANDLING: Recoverable errors — show message and return to menu.
+                // INTERVIEW EXPLANATION:
+                // "Checked exceptions force me to handle persistence and validation failures
+                //  explicitly instead of crashing the JVM."
                 view.displayErrorMessage(e.getMessage());
             }
         }
         view.displayExitBanner();
     }
 
+    /**
+     * USE CASE: Display Orders — read date from view, fetch from service, display list.
+     * NOTE: No future-date validation on display (rubric allows viewing past/present dates).
+     */
     private void displayOrder() throws FlooringPersistenceException {
         view.displayDisplayOrdersBanner();
         LocalDate orderDate = view.getOrderDate();
@@ -70,6 +116,10 @@ public class FlooringController {
         view.displayOrders(orders);
     }
 
+    /**
+     * USE CASE: Add Order — two-phase commit style: draft + confirm + persist.
+     * FLOW: collect input → createOrderDraft (validate+calculate) → summary → confirm → addOrder.
+     */
     private void addOrder() throws FlooringPersistenceException, FlooringValidationException {
         view.displayAddOrderBanner();
         LocalDate date = view.getOrderDate();
@@ -78,6 +128,7 @@ public class FlooringController {
         String productType = view.getProductType(service.getAllProducts());
         BigDecimal area = view.getArea();
 
+        // Service assigns order number and runs all business rules / BigDecimal math.
         Order draft = service.createOrderDraft(date, customerName, state, productType, area);
         view.displayOrderSummary(draft);
         if (view.confirm("Place this order?")) {
@@ -88,6 +139,10 @@ public class FlooringController {
         }
     }
 
+    /**
+     * USE CASE: Edit Order — load existing, optional field updates via view, recalculate, confirm save.
+     * BLANK FIELD RULE: Handled in service editOrderDraft (empty string keeps old value).
+     */
     private void editOrder() throws FlooringPersistenceException, FlooringValidationException {
         view.displayEditOrderBanner();
         LocalDate date = view.getOrderDate();
@@ -113,6 +168,9 @@ public class FlooringController {
         }
     }
 
+    /**
+     * USE CASE: Remove Order — show summary, confirm, delegate delete to service/DAO.
+     */
     private void removeOrder() throws FlooringPersistenceException {
         view.displayRemoveOrderBanner();
         LocalDate date = view.getOrderDate();
@@ -131,6 +189,9 @@ public class FlooringController {
         }
     }
 
+    /**
+     * USE CASE: Export All Data — service writes Backup/DataExport.txt; view confirms to user.
+     */
     private void exportAlldata() throws FlooringPersistenceException {
         service.exportAllData();
         view.displaySuccess("All data exported to Backup/DataExport.txt");

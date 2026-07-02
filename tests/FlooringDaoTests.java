@@ -1,12 +1,15 @@
-package Practice.FlooringMastery.tests;
+package tests;
 
-import Practice.FlooringMastery.DAO.OrderDAO;
-import Practice.FlooringMastery.DAO.OrderDAOImpl;
-import Practice.FlooringMastery.DAO.ProductDAO;
-import Practice.FlooringMastery.DAO.ProductDAOImpl;
-import Practice.FlooringMastery.DAO.TaxDAO;
-import Practice.FlooringMastery.DAO.TaxDAOImpl;
-import Practice.FlooringMastery.Model.Order;
+import DAO.FlooringPersistenceException;
+import DAO.OrderDAO;
+import DAO.OrderDAOImpl;
+import DAO.ProductDAO;
+import DAO.ProductDAOImpl;
+import DAO.TaxDAO;
+import DAO.TaxDAOImpl;
+import Model.Order;
+import Model.Product;
+import Model.Tax;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
@@ -14,37 +17,33 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.io.File;
-import java.io.FileWriter;
-import java.io.IOException;
-import java.io.PrintWriter;
-import java.math.BigDecimal;
 import java.time.LocalDate;
-import java.time.format.DateTimeFormatter;
 import java.util.List;
 
 @DisplayName("Flooring DAO Tests")
 public class FlooringDaoTests {
-    private static final DateTimeFormatter FILE_FORMAT = DateTimeFormatter.ofPattern("MMddyyyy");
+
     private File tempRoot;
     private File dataDir;
     private File ordersDir;
     private LocalDate date;
+
     private ProductDAO productDao;
     private TaxDAO taxDao;
     private OrderDAO orderDao;
 
     @BeforeEach
     public void setUp() throws Exception {
-        tempRoot = createTempDir("dao-tests");
+        tempRoot = TestFixtures.createTempDir("dao-tests");
         dataDir = new File(tempRoot, "Data");
         ordersDir = new File(tempRoot, "Orders");
         dataDir.mkdirs();
         ordersDir.mkdirs();
 
-        writeProducts(new File(dataDir, "Products.txt"));
-        writeTaxes(new File(dataDir, "Taxes.txt"));
+        TestFixtures.writeDefaultProducts(new File(dataDir, "Products.txt"));
+        TestFixtures.writeDefaultTaxes(new File(dataDir, "Taxes.txt"));
         date = LocalDate.now().plusDays(1);
-        writeOrders(new File(ordersDir, "Orders_" + date.format(FILE_FORMAT) + ".txt"));
+        TestFixtures.writeSampleOrders(TestFixtures.orderFileForDate(ordersDir, date), date);
 
         productDao = new ProductDAOImpl(new File(dataDir, "Products.txt").getPath());
         taxDao = new TaxDAOImpl(new File(dataDir, "Taxes.txt").getPath());
@@ -53,102 +52,175 @@ public class FlooringDaoTests {
 
     @AfterEach
     public void tearDown() {
-        deleteRecursively(tempRoot);
+        TestFixtures.deleteRecursively(tempRoot);
+    }
+
+    // --- ProductDAO ---
+
+    @Test
+    @DisplayName("Positive - All products load from file")
+    public void productsLoadTest() throws Exception {
+        List<Product> products = productDao.getAllProducts();
+        Assertions.assertEquals(2, products.size());
+        Assertions.assertEquals("Tile", products.get(0).getProductType());
     }
 
     @Test
-    @DisplayName("Positive - Products and taxes load correctly")
-    public void productsAndTaxesLoadTest() throws Exception {
-        Assertions.assertEquals(2, productDao.getAllProducts().size());
-        Assertions.assertNotNull(taxDao.getTax("TX"));
+    @DisplayName("Positive - Product lookup is case-insensitive")
+    public void productLookupCaseInsensitiveTest() throws Exception {
+        Assertions.assertNotNull(productDao.getProduct("tile"));
+        Assertions.assertNotNull(productDao.getProduct("WOOD"));
     }
 
     @Test
-    @DisplayName("Positive - Orders load and next order number increments")
-    public void loadOrdersAndNextNumberTest() throws Exception {
-        List<Order> loaded = orderDao.getOrdersByDate(date);
-        Assertions.assertEquals(2, loaded.size());
+    @DisplayName("Negative - Unknown product returns null")
+    public void unknownProductReturnsNullTest() throws Exception {
+        Assertions.assertNull(productDao.getProduct("Marble"));
+    }
+
+    @Test
+    @DisplayName("Negative - Missing products file throws persistence exception")
+    public void missingProductsFileTest() {
+        ProductDAO missingFileDao = new ProductDAOImpl(new File(dataDir, "NoProducts.txt").getPath());
+        Assertions.assertThrows(FlooringPersistenceException.class, missingFileDao::getAllProducts);
+    }
+
+    // --- TaxDAO ---
+
+    @Test
+    @DisplayName("Positive - All taxes load from file")
+    public void taxesLoadTest() throws Exception {
+        Assertions.assertEquals(2, taxDao.getAllTaxes().size());
+    }
+
+    @Test
+    @DisplayName("Positive - Tax lookup is case-insensitive")
+    public void taxLookupCaseInsensitiveTest() throws Exception {
+        Tax tx = taxDao.getTax("tx");
+        Assertions.assertNotNull(tx);
+        Assertions.assertEquals("TX", tx.getStateAbbreviation());
+    }
+
+    @Test
+    @DisplayName("Negative - Unknown state returns null")
+    public void unknownStateReturnsNullTest() throws Exception {
+        Assertions.assertNull(taxDao.getTax("ZZ"));
+    }
+
+    @Test
+    @DisplayName("Negative - Missing taxes file throws persistence exception")
+    public void missingTaxesFileTest() {
+        TaxDAO missingFileDao = new TaxDAOImpl(new File(dataDir, "NoTaxes.txt").getPath());
+        Assertions.assertThrows(FlooringPersistenceException.class, missingFileDao::getAllTaxes);
+    }
+
+    // --- OrderDAO read ---
+
+    @Test
+    @DisplayName("Positive - Orders load with quoted customer names parsed")
+    public void ordersLoadQuotedNameTest() throws Exception {
+        Order order = orderDao.getOrder(date, 1);
+        Assertions.assertNotNull(order);
+        Assertions.assertEquals("Acme, Inc.", order.getCustomerName());
+    }
+
+    @Test
+    @DisplayName("Positive - Orders for date are sorted by order number")
+    public void ordersSortedByNumberTest() throws Exception {
+        List<Order> orders = orderDao.getOrdersByDate(date);
+        Assertions.assertEquals(2, orders.size());
+        Assertions.assertEquals(1, orders.get(0).getOrderNumber());
+        Assertions.assertEquals(2, orders.get(1).getOrderNumber());
+    }
+
+    @Test
+    @DisplayName("Positive - Empty date returns empty list and next order number 1")
+    public void emptyDateFileTest() throws Exception {
+        LocalDate emptyDate = date.plusDays(30);
+        Assertions.assertTrue(orderDao.getOrdersByDate(emptyDate).isEmpty());
+        Assertions.assertEquals(1, orderDao.getNextOrderNumber(emptyDate));
+    }
+
+    @Test
+    @DisplayName("Positive - Next order number increments after existing orders")
+    public void nextOrderNumberTest() throws Exception {
         Assertions.assertEquals(3, orderDao.getNextOrderNumber(date));
     }
 
     @Test
-    @DisplayName("Positive - Add order and retrieve by number")
+    @DisplayName("Negative - Get missing order returns null")
+    public void getMissingOrderTest() throws Exception {
+        Assertions.assertNull(orderDao.getOrder(date, 999));
+    }
+
+    // --- OrderDAO write ---
+
+    @Test
+    @DisplayName("Positive - Add order persists and can be retrieved")
     public void addOrderTest() throws Exception {
-        Order newOrder = buildOrder(3, date, "Acme, Inc.", "TX", "Tile");
+        Order newOrder = TestFixtures.buildSimpleOrder(3, date, "New Customer", "TX", "Tile");
         orderDao.addOrder(date, newOrder);
-        Assertions.assertNotNull(orderDao.getOrder(date, 3));
+        Order loaded = orderDao.getOrder(date, 3);
+        Assertions.assertNotNull(loaded);
+        Assertions.assertEquals("New Customer", loaded.getCustomerName());
     }
 
     @Test
-    @DisplayName("Positive - Remove order successfully")
+    @DisplayName("Positive - Add order with comma in name round-trips through file")
+    public void addOrderCommaInNameTest() throws Exception {
+        Order newOrder = TestFixtures.buildSimpleOrder(3, date, "Acme, Inc.", "TX", "Tile");
+        orderDao.addOrder(date, newOrder);
+        Assertions.assertEquals("Acme, Inc.", orderDao.getOrder(date, 3).getCustomerName());
+    }
+
+    @Test
+    @DisplayName("Positive - Update order replaces existing row")
+    public void updateOrderTest() throws Exception {
+        Order existing = orderDao.getOrder(date, 1);
+        existing.setCustomerName("Updated Name");
+        orderDao.updateOrder(date, existing);
+        Assertions.assertEquals("Updated Name", orderDao.getOrder(date, 1).getCustomerName());
+    }
+
+    @Test
+    @DisplayName("Positive - Remove order deletes from file")
     public void removeOrderTest() throws Exception {
         orderDao.removeOrder(date, 1);
         Assertions.assertNull(orderDao.getOrder(date, 1));
+        Assertions.assertEquals(1, orderDao.getOrdersByDate(date).size());
     }
 
-    private static Order buildOrder(int number, LocalDate date, String customer, String state, String product) {
-        Order order = new Order();
-        order.setOrderNumber(number);
-        order.setOrderDate(date);
-        order.setCustomerName(customer);
-        order.setState(state);
-        order.setTaxRate(new BigDecimal("10.00"));
-        order.setProductType(product);
-        order.setArea(new BigDecimal("100.00"));
-        order.setCostPerSquareFoot(new BigDecimal("3.50"));
-        order.setLaborCostPerSquareFoot(new BigDecimal("4.15"));
-        order.setMaterialCost(new BigDecimal("350.00"));
-        order.setLaborCost(new BigDecimal("415.00"));
-        order.setTax(new BigDecimal("76.50"));
-        order.setTotal(new BigDecimal("841.50"));
-        return order;
+    @Test
+    @DisplayName("Negative - Remove missing order returns null")
+    public void removeMissingOrderTest() throws Exception {
+        Assertions.assertNull(orderDao.removeOrder(date, 999));
     }
 
-    private static void writeProducts(File file) throws IOException {
-        try (PrintWriter out = new PrintWriter(new FileWriter(file))) {
-            out.println("ProductType,CostPerSquareFoot,LaborCostPerSquareFoot");
-            out.println("Tile,3.50,4.15");
-            out.println("Wood,5.15,4.75");
-        }
+    @Test
+    @DisplayName("Positive - getAllOrders aggregates multiple date files")
+    public void getAllOrdersMultipleDatesTest() throws Exception {
+        LocalDate secondDate = date.plusDays(10);
+        Order secondDateOrder = TestFixtures.buildSimpleOrder(1, secondDate, "Second Day", "TX", "Tile");
+        orderDao.addOrder(secondDate, secondDateOrder);
+
+        List<Order> all = orderDao.getAllOrders();
+        Assertions.assertEquals(3, all.size());
     }
 
-    private static void writeTaxes(File file) throws IOException {
-        try (PrintWriter out = new PrintWriter(new FileWriter(file))) {
-            out.println("StateAbbreviation,StateName,TaxRate");
-            out.println("TX,Texas,10.00");
-            out.println("CA,California,25.00");
-        }
+    @Test
+    @DisplayName("Positive - getAllOrders returns empty when orders folder has no files")
+    public void getAllOrdersEmptyFolderTest() throws Exception {
+        File emptyOrdersDir = new File(tempRoot, "EmptyOrders");
+        emptyOrdersDir.mkdirs();
+        OrderDAO emptyDao = new OrderDAOImpl(emptyOrdersDir.getPath());
+        Assertions.assertTrue(emptyDao.getAllOrders().isEmpty());
     }
 
-    private static void writeOrders(File file) throws IOException {
-        try (PrintWriter out = new PrintWriter(new FileWriter(file))) {
-            out.println("OrderNumber,CustomerName,State,TaxRate,ProductType,Area,CostPerSquareFoot,LaborCostPerSquareFoot,MaterialCost,LaborCost,Tax,Total");
-            out.println("1,\"Acme, Inc.\",TX,10.00,Tile,100.00,3.50,4.15,350.00,415.00,76.50,841.50");
-            out.println("2,Ada Lovelace,CA,25.00,Wood,200.00,5.15,4.75,1030.00,950.00,495.00,2475.00");
-        }
+    @Test
+    @DisplayName("Positive - Order date on loaded order matches file date")
+    public void orderDateFromFileNameTest() throws Exception {
+        Order order = orderDao.getOrder(date, 2);
+        Assertions.assertEquals(date, order.getOrderDate());
+        Assertions.assertEquals("Wood", order.getProductType());
     }
-
-    private static File createTempDir(String name) {
-        File dir = new File(System.getProperty("java.io.tmpdir"), "flooring-" + name + "-" + System.nanoTime());
-        if (!dir.mkdirs()) {
-            throw new RuntimeException("Could not create temp directory");
-        }
-        return dir;
-    }
-
-    private static void deleteRecursively(File file) {
-        if (file == null || !file.exists()) {
-            return;
-        }
-        if (file.isDirectory()) {
-            File[] children = file.listFiles();
-            if (children != null) {
-                for (File child : children) {
-                    deleteRecursively(child);
-                }
-            }
-        }
-        file.delete();
-    }
-
 }

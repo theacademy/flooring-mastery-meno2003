@@ -1,6 +1,24 @@
-package Practice.FlooringMastery.DAO;
+/*
+ * =============================================================================
+ * CLASS: TaxDAOImpl
+ * PACKAGE: DAO
+ * =============================================================================
+ * WHAT: File-backed TaxDAO — reads Data/Taxes.txt.
+ *
+ * Mirrors ProductDAOImpl structure: LinkedHashMap cache, case normalization (UPPERCASE keys).
+ *
+ * SPRING DI: XML bean id "taxDao" in applicationContext.xml (or @Repository with AppConfig).
+ *
+ * BUSINESS RULE ENFORCEMENT: Service calls getTax; null return → "State not supported."
+ *
+ * INTERVIEW EXPLANATION:
+ * "TaxDAOImpl is the whitelist of states we operate in. The file is the source of truth
+ *  for both abbreviation and rate used in calculations."
+ * =============================================================================
+ */
+package DAO;
 
-import Practice.FlooringMastery.Model.Tax;
+import Model.Tax;
 
 import java.io.BufferedReader;
 import java.io.FileNotFoundException;
@@ -13,9 +31,12 @@ import java.util.Map;
 import java.util.Scanner;
 
 public class TaxDAOImpl implements TaxDAO {
+
     private static final String DEFAULT_TAX_FILE = "Data/Taxes.txt";
     private static final String DELIMITER = ",";
     private final String taxFile;
+
+    /** STATEFUL cache — keys are uppercase state abbreviations. */
     private final Map<String, Tax> taxes = new LinkedHashMap<>();
 
     public TaxDAOImpl() {
@@ -45,7 +66,7 @@ public class TaxDAOImpl implements TaxDAO {
         taxes.clear();
         try (Scanner scanner = new Scanner(new BufferedReader(new FileReader(taxFile)))) {
             if (scanner.hasNextLine()) {
-                scanner.nextLine();
+                scanner.nextLine(); // StateAbbreviation,StateName,TaxRate
             }
             while (scanner.hasNextLine()) {
                 String line = scanner.nextLine().trim();

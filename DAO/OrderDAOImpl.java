@@ -1,6 +1,32 @@
-package Practice.FlooringMastery.DAO;
+/*
+ * =============================================================================
+ * CLASS: OrderDAOImpl
+ * PACKAGE: DAO
+ * =============================================================================
+ * WHAT: Persists orders as one CSV file per order date: Orders/Orders_MMddyyyy.txt
+ *
+ * PATTERN: DAO — marshall/unmarshall Order DTO ↔ disk lines.
+ *
+ * COLLECTIONS:
+ *   - HashMap<Integer, Order> per date during load/modify/write cycle
+ *   - ArrayList for sorted output lists
+ *   - Comparator for sorting by order number or date+number
+ *
+ * FILE I/O: read with Scanner; write with PrintWriter; try-with-resources on write path.
+ *
+ * STATELESS SERVICE STYLE: Each public method loads map, mutates, writes — no cross-request cache.
+ *
+ * SPRING DI: Wired in config/applicationContext.xml as bean id "orderDao" (XML configuration).
+ *            For annotation-based config, add @Repository and use AppConfig + @ComponentScan.
+ *
+ * INTERVIEW EXPLANATION:
+ * "OrderDAOImpl treats each date file as the database table. We load the whole file into a Map,
+ *  apply CRUD in memory, then rewrite the file — acceptable for small training datasets."
+ * =============================================================================
+ */
+package DAO;
 
-import Practice.FlooringMastery.Model.Order;
+import Model.Order;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -20,10 +46,13 @@ import java.util.Map;
 import java.util.Scanner;
 
 public class OrderDAOImpl implements OrderDAO {
+
     private static final String DEFAULT_ORDERS_FOLDER = "Orders";
     private static final String HEADER = "OrderNumber,CustomerName,State,TaxRate,ProductType,Area,CostPerSquareFoot,LaborCostPerSquareFoot,MaterialCost,LaborCost,Tax,Total";
     private static final String DELIMITER = ",";
     private static final DateTimeFormatter FILE_DATE_FORMAT = DateTimeFormatter.ofPattern("MMddyyyy");
+
+    /** Configurable folder — tests inject temp directory path. */
     private final String ordersFolder;
 
     public OrderDAOImpl() {
@@ -50,6 +79,7 @@ public class OrderDAOImpl implements OrderDAO {
     @Override
     public Order addOrder(LocalDate date, Order order) throws FlooringPersistenceException {
         Map<Integer, Order> orders = loadOrders(date);
+        // Map.put returns previous value at key — may be null for new order number.
         Order previous = orders.put(order.getOrderNumber(), order);
         writeOrders(date, orders);
         return previous;
@@ -73,6 +103,7 @@ public class OrderDAOImpl implements OrderDAO {
 
     @Override
     public int getNextOrderNumber(LocalDate date) throws FlooringPersistenceException {
+        // STREAM API: max order number + 1, or 1 if no orders (orElse(0)+1).
         return loadOrders(date).keySet().stream().max(Integer::compareTo).orElse(0) + 1;
     }
 
@@ -97,6 +128,10 @@ public class OrderDAOImpl implements OrderDAO {
         return allOrders;
     }
 
+    /**
+     * Loads one date file into HashMap keyed by order number.
+     * Missing file → empty map (not an error — first order for that date).
+     */
     private Map<Integer, Order> loadOrders(LocalDate date) throws FlooringPersistenceException {
         Map<Integer, Order> orders = new HashMap<>();
         File file = new File(getFileName(date));
@@ -105,7 +140,7 @@ public class OrderDAOImpl implements OrderDAO {
         }
         try (Scanner scanner = new Scanner(new BufferedReader(new FileReader(file)))) {
             if (scanner.hasNextLine()) {
-                scanner.nextLine();
+                scanner.nextLine(); // skip HEADER row
             }
             while (scanner.hasNextLine()) {
                 String line = scanner.nextLine().trim();
@@ -121,6 +156,7 @@ public class OrderDAOImpl implements OrderDAO {
         return orders;
     }
 
+    /** Rewrites entire date file from in-memory map (full-file rewrite strategy). */
     private void writeOrders(LocalDate date, Map<Integer, Order> orders) throws FlooringPersistenceException {
         File folder = new File(ordersFolder);
         if (!folder.exists() && !folder.mkdirs()) {
@@ -138,6 +174,7 @@ public class OrderDAOImpl implements OrderDAO {
         }
     }
 
+    /** Builds path Orders/Orders_MMddyyyy.txt */
     private String getFileName(LocalDate date) {
         return ordersFolder + "/Orders_" + date.format(FILE_DATE_FORMAT) + ".txt";
     }
@@ -151,6 +188,10 @@ public class OrderDAOImpl implements OrderDAO {
         }
     }
 
+    /**
+     * CSV → Order DTO. Order date comes from filename, not row (row has no date column in storage file).
+     * Supports quoted customer names with commas via parseCsvLine.
+     */
     private Order unmarshallOrder(String line, LocalDate date) {
         List<String> tokens = parseCsvLine(line);
         Order order = new Order();
@@ -170,6 +211,7 @@ public class OrderDAOImpl implements OrderDAO {
         return order;
     }
 
+    /** Order DTO → CSV data line (no date column in per-date persistence file). */
     private String marshallOrder(Order order) {
         return order.getOrderNumber() + DELIMITER
                 + escapeCsv(order.getCustomerName()) + DELIMITER
@@ -195,6 +237,10 @@ public class OrderDAOImpl implements OrderDAO {
         return value;
     }
 
+    /**
+     * Custom CSV parser for quoted fields — needed for customer names like "Acme, Inc."
+     * STATEFUL loop: tracks inQuotes flag while scanning characters.
+     */
     private List<String> parseCsvLine(String line) {
         List<String> result = new ArrayList<>();
         StringBuilder current = new StringBuilder();

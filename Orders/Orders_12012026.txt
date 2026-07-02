@@ -1,0 +1,3 @@
+OrderNumber,CustomerName,State,TaxRate,ProductType,Area,CostPerSquareFoot,LaborCostPerSquareFoot,MaterialCost,LaborCost,Tax,Total
+1,mohamed,TX,4.45,Tile,500.00,3.50,4.15,1750.00,2075.00,170.21,3995.21
+ 
